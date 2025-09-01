@@ -1,0 +1,18 @@
+{
+  "name": "hashira-placements-solver",
+  "version": "1.0.0",
+  "description": "Polynomial coefficient solver for Hashira Placements Assignment",
+  "main": "polynomial_solver.js",
+  "scripts": {
+    "start": "node polynomial_solver.js",
+    "test": "node test_runner.js"
+  },
+  "keywords": [
+    "polynomial",
+    "lagrange",
+    "interpolation",
+    "cryptography"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
