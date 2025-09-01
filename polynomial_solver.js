@@ -2,34 +2,54 @@
 /* eslint-disable no-console */
 const fs = require('fs');
 
-// -------------------- BigInt fraction utilities --------------------
+// -------------------- Utilities --------------------
+
 function gcdBigInt(a, b) {
   a = a < 0n ? -a : a;
   b = b < 0n ? -b : b;
   while (b !== 0n) {
-    const t = b; b = a % b; a = t;
+    const t = b;
+    b = a % b;
+    a = t;
   }
   return a;
 }
 
-class Frac {
-  constructor(num, den = 1n) {
-    if (den === 0n) throw new Error('Zero denominator');
-    if (den < 0n) { num = -num; den = -den; }
-    const g = gcdBigInt(num < 0n ? -num : num, den);
-    this.n = num / g;
-    this.d = den / g;
-  }
-  static fromBigInt(x) { return new Frac(x, 1n); }
-  add(o) { return new Frac(this.n * o.d + o.n * this.d, this.d * o.d); }
-  sub(o) { return new Frac(this.n * o.d - o.n * this.d, this.d * o.d); }
-  mul(o) { return new Frac(this.n * o.n, this.d * o.d); }
-  div(o) { return new Frac(this.n * o.d, this.d * o.n); }
-  eqInt(x) { return this.d === 1n && this.n === x; }
-  toString() { return this.d === 1n ? this.n.toString() : `${this.n}/${this.d}`; }
+function simplifyFrac(num, den) {
+  if (den === 0n) throw new Error('Zero denominator in fraction');
+  if (den < 0n) { num = -num; den = -den; }
+  const g = gcdBigInt(num < 0n ? -num : num, den);
+  return [num / g, den / g];
 }
 
-// -------------------- Base conversion --------------------
+function addFrac(n1, d1, n2, d2) {
+  // (n1/d1) + (n2/d2) = (n1*d2 + n2*d1) / (d1*d2)
+  const num = n1 * d2 + n2 * d1;
+  const den = d1 * d2;
+  // reduce occasionally to keep numbers manageable
+  return simplifyFrac(num, den);
+}
+
+function mulFracBigInt(n, d, k) {
+  return simplifyFrac(n * k, d);
+}
+
+
+function binomBigInt(n, k) {
+  if (k < 0 || k > n) return 0n;
+  k = Math.min(k, n - k);
+  let num = 1n, den = 1n;
+  for (let i = 1n; i <= BigInt(k); i++) {
+    num *= BigInt(n) - (i - 1n);
+    den *= i;
+    const g = gcdBigInt(num, den);
+    num /= g; den /= g;
+  }
+  return num / den; 
+}
+
+
+
 function baseToDecimal(value, base) {
   if (base < 2 || base > 36) throw new Error('Base must be between 2 and 36');
   let result = 0n;
@@ -46,109 +66,89 @@ function baseToDecimal(value, base) {
   return result;
 }
 
-// -------------------- Vandermonde system (exact, no Lagrange) --------------------
-// Solve for a0..a_{k-1} in P(x) = a0 + a1 x + ... + a_{k-1} x^{k-1} using exact Gaussian elimination
-function solveVandermondeRational(subPoints) {
-  const k = subPoints.length;
-  const A = Array.from({ length: k }, () => Array(k).fill(null));
-  const b = Array(k).fill(null);
 
-  // Build Vandermonde matrix and RHS
-  for (let r = 0; r < k; r++) {
-    const [x, y] = subPoints[r];
-    b[r] = new Frac(y, 1n);
-    let xp = new Frac(1n, 1n);
-    for (let c = 0; c < k; c++) {
-      A[r][c] = xp;
-      xp = xp.mul(new Frac(BigInt(x), 1n));
+
+function lagrangeConstantAtZero(points, k) {
+  const selected = points.slice(0, k);
+  if (selected.length < k) throw new Error(`Need at least ${k} points to interpolate`);
+
+  // Validate duplicate x
+  for (let i = 0; i < selected.length; i++) {
+    for (let j = i + 1; j < selected.length; j++) {
+      if (selected[i][0] === selected[j][0]) {
+        throw new Error(`Duplicate x detected at x=${selected[i][0]}`);
+      }
     }
   }
 
-  // Gaussian elimination with partial pivoting
-  for (let col = 0; col < k; col++) {
-    let piv = col;
-    for (let r = col; r < k; r++) {
-      if (A[r][col].n !== 0n) { piv = r; break; }
-    }
-    if (A[piv][col].n === 0n) return null; // singular
-    if (piv !== col) { [A[col], A[piv]] = [A[piv], A[col]]; [b[col], b[piv]] = [b[piv], b[col]]; }
 
-    const fac = A[col][col];
-    for (let c = col; c < k; c++) A[col][c] = A[col][c].div(fac);
-    b[col] = b[col].div(fac);
-
-    for (let r = col + 1; r < k; r++) {
-      const f = A[r][col];
-      if (f.n === 0n) continue;
-      for (let c = col; c < k; c++) A[r][c] = A[r][c].sub(f.mul(A[col][c]));
-      b[r] = b[r].sub(f.mul(b[col]));
+  const isConsecutive = selected.every(([x], idx) => x === idx + 1);
+  if (isConsecutive) {
+    let sum = 0n;
+    for (let i = 0; i < k; i++) {
+      const sign = (i % 2 === 0) ? 1n : -1n; // (-1)^(i)
+      const coeff = binomBigInt(k, i + 1);   // C(k, i+1)
+      const yi = selected[i][1];
+      sum += sign * coeff * yi;
     }
+    return sum; // already integral
   }
 
-  // Back substitution
-  const a = Array(k).fill(new Frac(0n, 1n));
-  for (let i = k - 1; i >= 0; i--) {
-    let s = b[i];
-    for (let c = i + 1; c < k; c++) s = s.sub(A[i][c].mul(a[c]));
-    a[i] = s; // diagonal is 1
+
+  let numSum = 0n;
+  let denSum = 1n;
+
+  for (let i = 0; i < selected.length; i++) {
+    const [xi, yi] = selected[i];
+
+    let num = 1n;
+    let den = 1n;
+    for (let j = 0; j < selected.length; j++) {
+      if (j === i) continue;
+      const [xj] = selected[j];
+      num *= BigInt(0 - xj);
+      den *= BigInt(xi - xj);
+    }
+  
+    let [tn, td] = simplifyFrac(num * yi, den);
+  
+    [numSum, denSum] = addFrac(numSum, denSum, tn, td);
   }
-  return a; // coefficients a0..a_{k-1}
+
+  if (numSum % denSum !== 0n) {
+    throw new Error(`Non-integer constant term encountered (num=${numSum}, den=${denSum}); input may be inconsistent or insufficient.`);
+  }
+  return numSum / denSum;
 }
 
-function evalPolyRational(a, x) {
-  let xp = new Frac(1n, 1n);
-  let sum = new Frac(0n, 1n);
-  const X = new Frac(BigInt(x), 1n);
-  for (let i = 0; i < a.length; i++) {
-    sum = sum.add(a[i].mul(xp));
-    xp = xp.mul(X);
+
+function lagrangeEvaluate(points, k, xEval) {
+  const selected = points.slice(0, k);
+  let numSum = 0n;
+  let denSum = 1n;
+
+  for (let i = 0; i < selected.length; i++) {
+    const [xi, yi] = selected[i];
+    let num = 1n;
+    let den = 1n;
+    for (let j = 0; j < selected.length; j++) {
+      if (j === i) continue;
+      const [xj] = selected[j];
+      num *= BigInt(xEval - xj);
+      den *= BigInt(xi - xj);
+    }
+    let [tn, td] = simplifyFrac(num * yi, den);
+    [numSum, denSum] = addFrac(numSum, denSum, tn, td);
   }
-  return sum;
+  if (numSum % denSum !== 0n) {
+    // Return a string to aid debugging if it’s fractional
+    return `${numSum}/${denSum}`;
+  }
+  return numSum / denSum;
 }
 
-// -------------------- Robust consensus over k-subsets --------------------
-function allKSubsetsIndices(n, k) {
-  const res = [];
-  function rec(start, path) {
-    if (path.length === k) { res.push(path.slice()); return; }
-    for (let i = start; i <= n - (k - path.length); i++) {
-      path.push(i);
-      rec(i + 1, path);
-      path.pop();
-    }
-  }
-  rec(0, []);
-  return res;
-}
+// -------------------- Main solving --------------------
 
-function robustConstantTerm(points, k) {
-  const n = points.length;
-  if (n < k) throw new Error(`Need at least ${k} points, got ${n}`);
-  const subsets = allKSubsetsIndices(n, k); // for n=10,k=7 this is 120
-  let best = null;
-
-  for (const idxs of subsets) {
-    const subPts = idxs.map(i => points[i]);
-    const coeffs = solveVandermondeRational(subPts);
-    if (!coeffs) continue;
-
-    const inliers = [];
-    for (let j = 0; j < n; j++) {
-      const [x, y] = points[j];
-      const val = evalPolyRational(coeffs, x);
-      if (val.eqInt(y)) inliers.push(j);
-    }
-    const score = inliers.length;
-    if (!best || score > best.score) {
-      best = { score, inliers, coeffs, subset: idxs };
-      if (score === n) break; // perfect fit
-    }
-  }
-  if (!best) throw new Error('Failed to find a valid consensus model');
-  return best;
-}
-
-// -------------------- Orchestration --------------------
 function solvePolynomial(jsonData) {
   const n = jsonData.keys.n;
   const k = jsonData.keys.k;
@@ -159,21 +159,23 @@ function solvePolynomial(jsonData) {
   const points = [];
   for (let i = 1; i <= n; i++) {
     const key = String(i);
-    if (!jsonData[key]) continue;
-    const base = parseInt(jsonData[key].base, 10);
-    const value = jsonData[key].value;
-    const x = i;
-    const y = baseToDecimal(value, base);
-    points.push([x, y]);
-    console.log(`Point ${i}: (${x}, ${y.toString()}) - Base ${base}, Value: ${value}`);
+    if (jsonData[key]) {
+      const base = parseInt(jsonData[key].base, 10);
+      const value = jsonData[key].value;
+      const x = i;
+      const y = baseToDecimal(value, base);
+      points.push([x, y]);
+      console.log(`Point ${i}: (${x}, ${y.toString()}) - Base ${base}, Value: ${value}`);
+    }
+  }
+
+  if (points.length < k) {
+    throw new Error(`Only ${points.length} usable points present, but k=${k} required`);
   }
 
   points.sort((a, b) => a[0] - b[0]);
-
-  const best = robustConstantTerm(points, k);
-  const constantTerm = best.coeffs[0]; // a0 = P(0)
-
-  return { constantTerm, points, k, best };
+  const constantTerm = lagrangeConstantAtZero(points, k);
+  return { constantTerm, points, k };
 }
 
 function solveFromFile(filename) {
@@ -181,26 +183,20 @@ function solveFromFile(filename) {
     console.log(`\n=== SOLVING ${filename.toUpperCase()} ===`);
     const data = fs.readFileSync(filename, 'utf8');
     const jsonData = JSON.parse(data);
-    const { constantTerm, points, k, best } = solvePolynomial(jsonData);
-
-    console.log(`\nk = ${k}, inliers = ${best.inliers.length}/${points.length}`);
-    console.log(`Best subset indices (0-based): ${best.subset.join(', ')}`);
-    console.log(`CONSTANT TERM (c) for ${filename}: ${constantTerm.toString()}`);
+    const { constantTerm, points, k } = solvePolynomial(jsonData);
+    console.log(`\nCONSTANT TERM (c) for ${filename}: ${constantTerm.toString()}`);
     console.log('='.repeat(50));
 
-    // Consistency print with consensus model
-    console.log('Consensus check (1=inlier, 0=outlier):');
-    for (let i = 0; i < points.length; i++) {
-      const [x, y] = points[i];
-      const val = evalPolyRational(best.coeffs, x);
-      const ok = val.eqInt(y);
-      console.log(`x=${x}: P(x)=${val.toString()} vs y=${y.toString()} => ${ok ? 'OK' : 'MISMATCH'}`);
+    // Optional: consistency check
+    console.log('Consistency check (does each provided point lie on the degree-(k-1) polynomial from the first k points?):');
+    for (const [x, y] of points) {
+      const px = lagrangeEvaluate(points, k, x);
+      const ok = typeof px === 'bigint' ? (px === y) : false;
+      console.log(`x=${x}: P(x)=${px.toString()} vs y=${y.toString()} => ${ok ? 'OK' : 'MISMATCH'}`);
     }
-    console.log('Inlier mask:', points.map((_, i) => best.inliers.includes(i) ? 1 : 0).join(' '));
     console.log('='.repeat(50));
 
-    // Return BigInt if integral, else fraction string
-    return constantTerm.d === 1n ? constantTerm.n : BigInt(0); // constantTerm as BigInt if integral
+    return constantTerm;
   } catch (error) {
     console.error(`Error reading file ${filename}:`, error.message);
     return null;
@@ -208,6 +204,7 @@ function solveFromFile(filename) {
 }
 
 // -------------------- Test files --------------------
+
 function createTestFiles() {
   const testCase1 = {
     keys: { n: 4, k: 3 },
@@ -236,14 +233,14 @@ function createTestFiles() {
   console.log('Test case files created: testcase1.json, testcase2.json');
 }
 
-// -------------------- Optional manual note --------------------
+
+
 function verifyTestCase1() {
   console.log('\n=== MANUAL VERIFICATION FOR TEST CASE 1 ===');
   console.log('Points after base conversion: (1,4), (2,7), (3,12), (6,39)');
   console.log('Using first 3 points gives P(x) = x^2 + 3, so constant term c = 3');
 }
 
-// -------------------- CLI --------------------
 function main() {
   console.log('POLYNOMIAL SOLVER - FINDING CONSTANT TERM');
   console.log('='.repeat(60));
@@ -268,9 +265,8 @@ module.exports = {
   solvePolynomial,
   solveFromFile,
   baseToDecimal,
-  solveVandermondeRational,
-  evalPolyRational,
-  robustConstantTerm,
+  lagrangeConstantAtZero,
+  lagrangeEvaluate,
   createTestFiles
 };
 
