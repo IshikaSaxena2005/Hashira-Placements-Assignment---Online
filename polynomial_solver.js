@@ -1,8 +1,7 @@
-// polynomial_solver.js
-/* eslint-disable no-console */
+
 const fs = require('fs');
 
-// -------------------- Utilities --------------------
+
 
 function gcdBigInt(a, b) {
   a = a < 0n ? -a : a;
@@ -23,10 +22,10 @@ function simplifyFrac(num, den) {
 }
 
 function addFrac(n1, d1, n2, d2) {
-  // (n1/d1) + (n2/d2) = (n1*d2 + n2*d1) / (d1*d2)
+ 
   const num = n1 * d2 + n2 * d1;
   const den = d1 * d2;
-  // reduce occasionally to keep numbers manageable
+
   return simplifyFrac(num, den);
 }
 
@@ -91,7 +90,7 @@ function lagrangeConstantAtZero(points, k) {
       const yi = selected[i][1];
       sum += sign * coeff * yi;
     }
-    return sum; // already integral
+    return sum; 
   }
 
 
@@ -141,13 +140,13 @@ function lagrangeEvaluate(points, k, xEval) {
     [numSum, denSum] = addFrac(numSum, denSum, tn, td);
   }
   if (numSum % denSum !== 0n) {
-    // Return a string to aid debugging if it’s fractional
+
     return `${numSum}/${denSum}`;
   }
   return numSum / denSum;
 }
 
-// -------------------- Main solving --------------------
+
 
 function solvePolynomial(jsonData) {
   const n = jsonData.keys.n;
@@ -203,7 +202,7 @@ function solveFromFile(filename) {
   }
 }
 
-// -------------------- Test files --------------------
+
 
 function createTestFiles() {
   const testCase1 = {
@@ -273,3 +272,4 @@ module.exports = {
 if (require.main === module) {
   main();
 }
+
